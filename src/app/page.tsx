@@ -24,6 +24,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [sharedProjects, setSharedProjects] = useState<Project[]>([]);
+  const [sharedProjectIds, setSharedProjectIds] = useState<Set<string>>(new Set());
   const [newProjectName, setNewProjectName] = useState('');
   const [creatingProject, setCreatingProject] = useState(false);
 
@@ -79,6 +80,16 @@ export default function Home() {
 
       console.log('[fetchProjects] owned:', owned?.length, 'error:', ownedErr?.message);
       setProjects(owned || []);
+
+      // Check which owned projects have members (are shared)
+      if (owned && owned.length > 0) {
+        const { data: allMembers } = await supabase
+          .from('project_members')
+          .select('project_id')
+          .in('project_id', owned.map((p: any) => p.id));
+        const ids = new Set((allMembers || []).map((m: any) => m.project_id));
+        setSharedProjectIds(ids);
+      }
 
       // Shared projects
       const { data: members, error: membersErr } = await supabase
@@ -287,7 +298,15 @@ export default function Home() {
                     className={styles.projectContent}
                     onClick={() => router.push(`/canvas?project=${project.id}`)}
                   >
-                    <h3 className={styles.projectName}>{project.name}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <h3 className={styles.projectName}>{project.name}</h3>
+                      {sharedProjectIds.has(project.id) && (
+                        <span style={{
+                          fontSize: '10px', color: '#F0C4A0', background: 'rgba(240,196,160,0.12)',
+                          padding: '2px 6px', borderRadius: '3px', fontWeight: 500, whiteSpace: 'nowrap',
+                        }}>shared</span>
+                      )}
+                    </div>
                     <p className={styles.projectDate}>{formatDate(project.updated_at)}</p>
                   </div>
                   <button

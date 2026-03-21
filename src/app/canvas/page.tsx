@@ -1580,6 +1580,89 @@ function CanvasInner() {
       document.querySelector('[data-toolbar="addDesc"]')?.addEventListener('click', () => addText('description'));
       document.querySelector('[data-toolbar="save"]')?.addEventListener('click', () => saveProject());
 
+      // ── Share Popup ──
+      const sharePopup = document.getElementById('sharePopup')!;
+      const shareOverlay = document.getElementById('shareOverlay')!;
+      const shareEmail = document.getElementById('shareEmail') as HTMLInputElement;
+      const shareSend = document.getElementById('shareSend')!;
+      const shareClose = document.getElementById('shareClose')!;
+      const shareStatus = document.getElementById('shareStatus')!;
+      const shareMembersList = document.getElementById('shareMembersList')!;
+
+      function openSharePopup() {
+        sharePopup.style.display = 'block';
+        shareOverlay.style.display = 'block';
+        shareEmail.value = '';
+        shareStatus.textContent = '';
+        shareEmail.focus();
+        loadMembers();
+      }
+
+      function closeSharePopup() {
+        sharePopup.style.display = 'none';
+        shareOverlay.style.display = 'none';
+      }
+
+      async function loadMembers() {
+        const { data } = await supabase
+          .from('project_members')
+          .select('email, role')
+          .eq('project_id', projectId);
+
+        if (data && data.length > 0) {
+          shareMembersList.innerHTML = '<div style="font-size:12px;color:#555;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Shared with</div>' +
+            data.map((m: any) => `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid #333">
+              <span style="font-size:13px;color:#aaa">${m.email}</span>
+              <span style="font-size:11px;color:#555">${m.role}</span>
+            </div>`).join('');
+        } else {
+          shareMembersList.innerHTML = '';
+        }
+      }
+
+      async function sendInvite() {
+        const email = shareEmail.value.trim().toLowerCase();
+        if (!email || !email.includes('@')) {
+          shareStatus.textContent = 'Enter a valid email address';
+          shareStatus.style.color = '#ff6b6b';
+          return;
+        }
+
+        shareSend.textContent = 'Sending...';
+        shareStatus.textContent = '';
+
+        try {
+          const res = await fetch('/api/invite', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId, email }),
+          });
+          const result = await res.json();
+
+          if (result.success) {
+            shareStatus.textContent = `Invited ${email}`;
+            shareStatus.style.color = '#8bc34a';
+            shareEmail.value = '';
+            loadMembers();
+          } else {
+            shareStatus.textContent = result.error || 'Failed to invite';
+            shareStatus.style.color = '#ff6b6b';
+          }
+        } catch (err) {
+          shareStatus.textContent = 'Network error';
+          shareStatus.style.color = '#ff6b6b';
+        }
+        shareSend.textContent = 'Invite';
+      }
+
+      document.querySelector('[data-toolbar="share"]')?.addEventListener('click', openSharePopup);
+      shareClose.addEventListener('click', closeSharePopup);
+      shareOverlay.addEventListener('click', closeSharePopup);
+      shareSend.addEventListener('click', sendInvite);
+      shareEmail.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') sendInvite();
+      });
+
       function zoomAt(f: number) {
         const vw = (window.innerWidth - 52) / 2, vh = window.innerHeight / 2;
         const wx = (vw - panX) / zoom, wy = (vh - panY) / zoom;
@@ -1887,6 +1970,15 @@ function CanvasInner() {
             <polyline points="7 3 7 8 15 8" />
           </svg>
         </button>
+        <button className="tool-btn" data-toolbar="share" title="Share Project">
+          <svg viewBox="0 0 24 24">
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+            <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+          </svg>
+        </button>
 
         <div className="toolbar-spacer"></div>
 
@@ -1990,6 +2082,36 @@ function CanvasInner() {
 
       <div id="zoomIndicator">100%</div>
       <div id="saveIndicator">Saved</div>
+
+      {/* Share Popup */}
+      <div id="sharePopup" style={{
+        display: 'none', position: 'fixed', top: '50%', left: '50%',
+        transform: 'translate(-50%, -50%)', background: '#2a2a2a',
+        border: '1px solid #3a3a3a', borderRadius: '12px', padding: '24px',
+        zIndex: 3000, minWidth: '340px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
+        fontFamily: 'var(--font-sans)',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <span style={{ color: '#e0e0e0', fontSize: '16px', fontWeight: 600 }}>Share Project</span>
+          <button id="shareClose" style={{
+            background: 'none', border: 'none', color: '#666', fontSize: '20px', cursor: 'pointer',
+          }}>&times;</button>
+        </div>
+        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+          <input id="shareEmail" type="email" placeholder="Email address..."
+            style={{
+              flex: 1, background: '#222', border: '1px solid #444', color: '#e0e0e0',
+              padding: '10px 14px', borderRadius: '6px', fontSize: '14px', outline: 'none',
+            }}
+          />
+          <button id="shareSend" className="btn" style={{ whiteSpace: 'nowrap' }}>Invite</button>
+        </div>
+        <div id="shareStatus" style={{ fontSize: '13px', color: '#666', minHeight: '20px' }}></div>
+        <div id="shareMembersList" style={{ marginTop: '12px', maxHeight: '150px', overflowY: 'auto' }}></div>
+      </div>
+      <div id="shareOverlay" style={{
+        display: 'none', position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 2999,
+      }}></div>
 
       <canvas ref={samplerCanvasRef} style={{ display: 'none' }}></canvas>
     </div>

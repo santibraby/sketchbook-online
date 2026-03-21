@@ -534,7 +534,7 @@ html, body {
 .toolbar-divider { width: 28px; height: 1px; background: #333; margin: 4px 0; }
 
 /* ── Context Menu ── */
-#contextMenu {
+#canvasMenu, #objectMenu {
   display: none;
   position: fixed;
   background: #2a2a2a;
@@ -563,6 +563,54 @@ html, body {
 }
 .ctx-sub:hover .ctx-sub-menu { display: block; }
 .ctx-item .arrow { margin-left: auto; font-size: 10px; color: #666; }
+
+/* ── Font Picker Panel ── */
+#fontPickerPanel {
+  display: none;
+  position: fixed;
+  background: #2a2a2a;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 2001;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  width: 280px;
+  max-height: 500px;
+  overflow: hidden;
+  flex-direction: column;
+}
+#fontPickerPanel.visible { display: flex; }
+#fontPickerPanel input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #ccc;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+#fontPickerPanel input::placeholder { color: #666; }
+#fontList {
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.font-item {
+  padding: 10px 12px;
+  color: #ccc;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.font-item:hover { background: #363636; color: #fff; }
+.font-item.selected { background: rgba(240, 196, 160, 0.2); color: var(--peach); }
 
 /* ── Indicators ── */
 #zoomIndicator {

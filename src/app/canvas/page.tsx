@@ -23,6 +23,10 @@ interface CanvasObject {
   cloud?: { rx: number; ry: number; rw: number; rh: number };
   leader?: { tx: number; ty: number };
   markupText?: string;
+  fontFamily?: string;
+  textColor?: string;
+  originalW?: number;
+  originalH?: number;
 }
 
 async function uploadImage(
@@ -165,7 +169,9 @@ function CanvasInner() {
       const gridLayer = gridLayerRef.current!;
       const samplerCanvas = samplerCanvasRef.current!;
 
-      const contextMenu = document.getElementById('contextMenu')!;
+      const canvasMenu = document.getElementById('canvasMenu')!;
+      const objectMenu = document.getElementById('objectMenu')!;
+      const fontPickerPanel = document.getElementById('fontPickerPanel')!;
       const zoomIndicator = document.getElementById('zoomIndicator')!;
       const saveIndicator = document.getElementById('saveIndicator')!;
       const drawPreview = document.getElementById('drawPreview')!;
@@ -262,6 +268,8 @@ function CanvasInner() {
         content: '', zIndex: 1, textStyle: 'title' as const, crop: null,
         points: null, strokeColor: '#F0C4A0', strokeWidth: 4,
         cloud: null, leader: null, markupText: '',
+        fontFamily: null, textColor: null,
+        originalW: null, originalH: null,
       };
 
       function normalizeObject(obj: any): CanvasObject {
@@ -629,6 +637,8 @@ function CanvasInner() {
               span.textContent = ph[obj.textStyle || 'title'] || 'Text';
               el.appendChild(span);
             }
+            if (obj.fontFamily) { el.style.fontFamily = obj.fontFamily; }
+            if (obj.textColor) { el.style.color = obj.textColor; }
           }
 
           ['tl', 'tr', 'bl', 'br'].forEach(pos => {
@@ -1494,23 +1504,54 @@ function CanvasInner() {
         const objEl = (e.target as HTMLElement).closest('.canvas-obj') as HTMLDivElement | null;
         const wp = screenToWorld(e.clientX, e.clientY);
         contextWorldX = wp.x; contextWorldY = wp.y;
-        const onObj = !!objEl;
-        if (onObj) { const id = parseInt(objEl!.dataset.id); if (!selectedIds.has(id)) selectObject(id); }
 
-        const showCls = onObj ? '' : 'none';
-        const hideCls = onObj ? 'none' : '';
-        document.querySelectorAll('[data-ctx-obj]').forEach(el => el.setAttribute('style', `display: ${showCls}`));
+        hideFontPickerPanel();
 
-        contextMenu.style.display = 'block';
-        let x = e.clientX, y = e.clientY;
-        if (x + 190 > window.innerWidth) x = window.innerWidth - 190;
-        if (y + 250 > window.innerHeight) y = window.innerHeight - 250;
-        contextMenu.style.left = x + 'px'; contextMenu.style.top = y + 'px';
+        if (objEl) {
+          // Right-click on object: show Object Menu
+          const id = parseInt(objEl.dataset.id!);
+          if (!selectedIds.has(id)) selectObject(id);
+          showObjectMenu(e);
+        } else {
+          // Right-click on empty space: show Canvas Menu
+          canvasMenu.style.display = 'block';
+          let x = e.clientX, y = e.clientY;
+          if (x + 190 > window.innerWidth) x = window.innerWidth - 190;
+          if (y + 280 > window.innerHeight) y = window.innerHeight - 280;
+          canvasMenu.style.left = x + 'px';
+          canvasMenu.style.top = y + 'px';
+        }
       }
 
-      function hideContextMenu() { contextMenu.style.display = 'none'; }
+      function showObjectMenu(e: MouseEvent) {
+        objectMenu.style.display = 'block';
 
-      document.addEventListener('mousedown', (e: MouseEvent) => { if (!contextMenu.contains(e.target as Node)) hideContextMenu(); });
+        // Determine object type and show relevant menu items
+        const selectedObj = objects.find(o => selectedIds.has(o.id));
+        const isText = selectedObj && selectedObj.type === 'text';
+        const isImage = selectedObj && selectedObj.type === 'image';
+
+        const textSection = document.getElementById('textObjectSection');
+        const imageSection = document.getElementById('imageObjectSection');
+        if (textSection) textSection.style.display = isText ? 'block' : 'none';
+        if (imageSection) imageSection.style.display = isImage ? 'block' : 'none';
+
+        let x = e.clientX, y = e.clientY;
+        if (x + 190 > window.innerWidth) x = window.innerWidth - 190;
+        if (y + 280 > window.innerHeight) y = window.innerHeight - 280;
+        objectMenu.style.left = x + 'px';
+        objectMenu.style.top = y + 'px';
+      }
+
+      function hideContextMenu() { canvasMenu.style.display = 'none'; objectMenu.style.display = 'none'; }
+      function hideFontPickerPanel() { fontPickerPanel.classList.remove('visible'); }
+
+      document.addEventListener('mousedown', (e: MouseEvent) => {
+        if (!canvasMenu.contains(e.target as Node) && !objectMenu.contains(e.target as Node) && !fontPickerPanel.contains(e.target as Node)) {
+          hideContextMenu();
+          hideFontPickerPanel();
+        }
+      });
 
       function addImages(wx?: number, wy?: number) {
         const input = document.createElement('input');
@@ -1579,6 +1620,240 @@ function CanvasInner() {
       document.querySelector('[data-toolbar="addSubtitle"]')?.addEventListener('click', () => addText('subtitle'));
       document.querySelector('[data-toolbar="addDesc"]')?.addEventListener('click', () => addText('description'));
       document.querySelector('[data-toolbar="save"]')?.addEventListener('click', () => saveProject());
+
+      // Canvas Menu handlers
+      document.querySelector('[data-ctx-action="addImages"]')?.addEventListener('click', () => { hideContextMenu(); addImages(contextWorldX, contextWorldY); });
+      document.querySelector('[data-ctx-text="title"]')?.addEventListener('click', () => { hideContextMenu(); addText('title', contextWorldX, contextWorldY); });
+      document.querySelector('[data-ctx-text="subtitle"]')?.addEventListener('click', () => { hideContextMenu(); addText('subtitle', contextWorldX, contextWorldY); });
+      document.querySelector('[data-ctx-text="description"]')?.addEventListener('click', () => { hideContextMenu(); addText('description', contextWorldX, contextWorldY); });
+      document.querySelector('[data-ctx-action="addRect"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        const id = nextId++;
+        const mz = objects.length ? Math.max(...objects.map(o => o.zIndex)) + 1 : 1;
+        objects.push(normalizeObject({ id, type: 'shape', x: contextWorldX - 100, y: contextWorldY - 75, w: 200, h: 150, content: '', zIndex: mz }));
+        selectObject(id); renderObjects(); markDirty();
+      });
+      document.querySelector('[data-ctx-tool="markup"]')?.addEventListener('click', () => { hideContextMenu(); setTool('markup'); });
+      document.querySelector('[data-ctx-tool="draw"]')?.addEventListener('click', () => { hideContextMenu(); setTool('draw'); });
+      document.querySelector('[data-ctx-tool="eyedropper"]')?.addEventListener('click', () => { hideContextMenu(); setTool('eyedropper'); });
+
+      // Object Menu handlers - Text style
+      document.querySelector('[data-ctx-text-style="title"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'text') o.textStyle = 'title';
+        }
+        renderObjects(); markDirty();
+      });
+      document.querySelector('[data-ctx-text-style="subtitle"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'text') o.textStyle = 'subtitle';
+        }
+        renderObjects(); markDirty();
+      });
+      document.querySelector('[data-ctx-text-style="description"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'text') o.textStyle = 'description';
+        }
+        renderObjects(); markDirty();
+      });
+
+      // Font picker
+      document.querySelector('[data-ctx-action="changeFont"]')?.addEventListener('click', (ev) => {
+        showFontPickerPanel(ev);
+      });
+
+      // Color picker
+      document.querySelector('[data-ctx-action="changeColor"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = '#ffffff';
+        colorInput.style.display = 'none';
+        document.body.appendChild(colorInput);
+        colorInput.click();
+        colorInput.addEventListener('change', () => {
+          pushUndo();
+          const color = colorInput.value;
+          for (const sid of selectedIds) {
+            const o = objects.find(x => x.id === sid);
+            if (o && o.type === 'text') o.textColor = color;
+          }
+          renderObjects(); markDirty();
+          document.body.removeChild(colorInput);
+        });
+        colorInput.addEventListener('cancel', () => {
+          document.body.removeChild(colorInput);
+        });
+      });
+
+      // Image crop handlers
+      function applyCropRatio(ratio: [number, number]) {
+        hideContextMenu();
+        pushUndo();
+        const [rw, rh] = ratio;
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'image') {
+            // Store original dimensions if not already stored
+            if (!o.originalW) o.originalW = o.w;
+            if (!o.originalH) o.originalH = o.h;
+
+            const origW = o.originalW || o.w;
+            const origH = o.originalH || o.h;
+            const targetRatio = rw / rh;
+            const currentRatio = origW / origH;
+
+            let cropW, cropH;
+            if (currentRatio > targetRatio) {
+              // Too wide, crop width
+              cropH = origH;
+              cropW = cropH * targetRatio;
+            } else {
+              // Too tall, crop height
+              cropW = origW;
+              cropH = cropW / targetRatio;
+            }
+
+            const cropX = (origW - cropW) / 2;
+            const cropY = (origH - cropH) / 2;
+
+            o.crop = { x: cropX, y: cropY, w: cropW, h: cropH };
+            o.w = Math.round(cropW);
+            o.h = Math.round(cropH);
+          }
+        }
+        renderObjects(); markDirty();
+      }
+
+      document.querySelector('[data-ctx-crop="34p"]')?.addEventListener('click', () => applyCropRatio([3, 4]));
+      document.querySelector('[data-ctx-crop="43l"]')?.addEventListener('click', () => applyCropRatio([4, 3]));
+      document.querySelector('[data-ctx-crop="35p"]')?.addEventListener('click', () => applyCropRatio([3, 5]));
+      document.querySelector('[data-ctx-crop="53l"]')?.addEventListener('click', () => applyCropRatio([5, 3]));
+      document.querySelector('[data-ctx-crop="11s"]')?.addEventListener('click', () => applyCropRatio([1, 1]));
+      document.querySelector('[data-ctx-crop="reset"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'image') {
+            o.crop = null;
+            if (o.originalW) o.w = o.originalW;
+            if (o.originalH) o.h = o.originalH;
+          }
+        }
+        renderObjects(); markDirty();
+      });
+
+      // Common object menu handlers
+      document.querySelector('[data-ctx-action="bringFront"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        const mz = Math.max(...objects.map(o => o.zIndex), 0);
+        let i = 1;
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o) o.zIndex = mz + i++;
+        }
+        renderObjects(); markDirty();
+      });
+      document.querySelector('[data-ctx-action="sendBack"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        const mz = Math.min(...objects.map(o => o.zIndex), 0);
+        let i = 1;
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o) o.zIndex = mz - i++;
+        }
+        renderObjects(); markDirty();
+      });
+      document.querySelector('[data-ctx-action="delete"]')?.addEventListener('click', () => { hideContextMenu(); deleteSelected(); });
+
+      // ── Font Picker ──
+      const GOOGLE_FONTS = [
+        'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Oswald', 'Raleway', 'Poppins', 'Nunito', 'Merriweather',
+        'Playfair Display', 'PT Sans', 'Roboto Slab', 'Source Sans Pro', 'Ubuntu', 'Noto Sans', 'Roboto Mono', 'Lora',
+        'Fira Sans', 'Mulish', 'Barlow', 'DM Sans', 'Rubik', 'Work Sans', 'Quicksand', 'Karla', 'Libre Baskerville',
+        'IBM Plex Sans', 'Josefin Sans', 'Cabin', 'Arimo', 'Dosis', 'Oxygen', 'Hind', 'Titillium Web', 'PT Serif',
+        'Noto Serif', 'Crimson Text', 'EB Garamond', 'Source Serif Pro', 'Cormorant Garamond', 'Bitter', 'Vollkorn',
+        'Spectral', 'Libre Franklin', 'Exo 2', 'Overpass', 'Assistant', 'Heebo', 'Maven Pro', 'Catamaran', 'Abel',
+        'Prompt', 'Signika', 'Archivo', 'Red Hat Display', 'Manrope', 'Sora', 'Space Grotesk', 'Plus Jakarta Sans',
+        'Outfit', 'Lexend', 'Figtree', 'Geist', 'Atkinson Hyperlegible', 'Bebas Neue', 'Anton', 'Black Ops One',
+        'Righteous', 'Bungee', 'Fredoka One', 'Pacifico', 'Dancing Script', 'Great Vibes', 'Caveat', 'Permanent Marker',
+        'Shadows Into Light', 'Patrick Hand', 'Architects Daughter', 'Indie Flower', 'Amatic SC', 'Lobster', 'Bangers',
+        'Press Start 2P', 'Space Mono', 'JetBrains Mono', 'Fira Code', 'Source Code Pro', 'IBM Plex Mono', 'Inconsolata',
+        'Anonymous Pro', 'Courier Prime'
+      ];
+
+      let loadedFonts = new Set<string>();
+
+      function loadGoogleFont(fontName: string) {
+        if (loadedFonts.has(fontName)) return;
+        const fontUrl = `https://fonts.googleapis.com/css2?family=${fontName.replace(/ /g, '+')}:wght@400;600&display=swap`;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = fontUrl;
+        link.onload = () => { loadedFonts.add(fontName); };
+        link.onerror = () => { console.warn(`Failed to load font: ${fontName}`); };
+        document.head.appendChild(link);
+      }
+
+      function initializeFontList() {
+        const fontList = document.getElementById('fontList');
+        if (!fontList) return;
+        fontList.innerHTML = '';
+        GOOGLE_FONTS.forEach(font => {
+          const item = document.createElement('div');
+          item.className = 'font-item';
+          item.textContent = font;
+          item.style.fontFamily = `"${font}", sans-serif`;
+          item.addEventListener('click', () => {
+            pushUndo();
+            loadGoogleFont(font);
+            for (const sid of selectedIds) {
+              const o = objects.find(x => x.id === sid);
+              if (o && o.type === 'text') o.fontFamily = `"${font}", sans-serif`;
+            }
+            renderObjects(); markDirty();
+            hideFontPickerPanel();
+          });
+          fontList.appendChild(item);
+        });
+      }
+
+      function showFontPickerPanel(e: any) {
+        hideContextMenu();
+        initializeFontList();
+        const rect = (e.target as HTMLElement).getBoundingClientRect();
+        fontPickerPanel.classList.add('visible');
+        let x = rect.right;
+        let y = rect.top;
+        if (x + 280 > window.innerWidth) x = window.innerWidth - 280;
+        if (y + 500 > window.innerHeight) y = window.innerHeight - 500;
+        fontPickerPanel.style.left = x + 'px';
+        fontPickerPanel.style.top = y + 'px';
+
+        const fontSearch = document.getElementById('fontSearch') as HTMLInputElement;
+        fontSearch.value = '';
+        fontSearch.focus();
+        fontSearch.addEventListener('input', (ev) => {
+          const query = (ev.target as HTMLInputElement).value.toLowerCase();
+          const items = document.querySelectorAll('.font-item');
+          items.forEach(item => {
+            (item as HTMLElement).style.display = item.textContent!.toLowerCase().includes(query) ? 'block' : 'none';
+          });
+        }, { once: false });
+      }
 
       // ── Share Popup ──
       const sharePopup = document.getElementById('sharePopup')!;
@@ -2120,7 +2395,8 @@ function CanvasInner() {
         </label>
       </div>
 
-      <div id="contextMenu">
+      {/* Canvas Context Menu (right-click on empty space) */}
+      <div id="canvasMenu">
         <div className="ctx-item" data-ctx-action="addImages">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -2130,7 +2406,7 @@ function CanvasInner() {
           Add Images
         </div>
         <div className="ctx-sub">
-          <div className="ctx-item" data-ctx-action="addText">
+          <div className="ctx-item">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M4 7V4h16v3" />
               <line x1="12" y1="4" x2="12" y2="20" />
@@ -2178,11 +2454,64 @@ function CanvasInner() {
             </div>
           </div>
         </div>
-        <div className="ctx-divider" data-ctx-obj="true"></div>
-        <div className="ctx-item" data-ctx-obj="true" data-ctx-action="bringFront">Bring to Front</div>
-        <div className="ctx-item" data-ctx-obj="true" data-ctx-action="sendBack">Send to Back</div>
-        <div className="ctx-divider" data-ctx-obj="true"></div>
-        <div className="ctx-item danger" data-ctx-obj="true" data-ctx-action="delete">Delete</div>
+      </div>
+
+      {/* Object Context Menu (right-click on selected object) */}
+      <div id="objectMenu">
+        {/* Text object menu items */}
+        <div id="textObjectSection">
+          <div className="ctx-sub">
+            <div className="ctx-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7V4h16v3" />
+                <line x1="12" y1="4" x2="12" y2="20" />
+              </svg>
+              Change Style <span className="arrow">&#9654;</span>
+            </div>
+            <div className="ctx-sub-menu">
+              <div className="ctx-item" data-ctx-text-style="title">Title</div>
+              <div className="ctx-item" data-ctx-text-style="subtitle">Subtitle</div>
+              <div className="ctx-item" data-ctx-text-style="description">Description</div>
+            </div>
+          </div>
+          <div className="ctx-item" data-ctx-action="changeFont">Change Font</div>
+          <div className="ctx-item" data-ctx-action="changeColor">Change Color</div>
+          <div className="ctx-divider"></div>
+        </div>
+
+        {/* Image object menu items */}
+        <div id="imageObjectSection" style={{ display: 'none' }}>
+          <div className="ctx-sub">
+            <div className="ctx-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+              </svg>
+              Crop <span className="arrow">&#9654;</span>
+            </div>
+            <div className="ctx-sub-menu">
+              <div className="ctx-item" data-ctx-crop="34p">3:4 Portrait</div>
+              <div className="ctx-item" data-ctx-crop="43l">4:3 Landscape</div>
+              <div className="ctx-item" data-ctx-crop="35p">3:5 Portrait</div>
+              <div className="ctx-item" data-ctx-crop="53l">5:3 Landscape</div>
+              <div className="ctx-item" data-ctx-crop="11s">1:1 Square</div>
+              <div className="ctx-divider"></div>
+              <div className="ctx-item" data-ctx-crop="reset">Reset Crop</div>
+            </div>
+          </div>
+          <div className="ctx-divider"></div>
+        </div>
+
+        {/* Common items for all object types */}
+        <div className="ctx-item" data-ctx-action="bringFront">Bring to Front</div>
+        <div className="ctx-item" data-ctx-action="sendBack">Send to Back</div>
+        <div className="ctx-divider"></div>
+        <div className="ctx-item danger" data-ctx-action="delete">Delete</div>
+      </div>
+
+      {/* Font Picker Panel */}
+      <div id="fontPickerPanel">
+        <input type="text" id="fontSearch" placeholder="Search fonts..." />
+        <div id="fontList"></div>
       </div>
 
       <div id="zoomIndicator">100%</div>

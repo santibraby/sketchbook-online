@@ -1876,9 +1876,65 @@ function CanvasInner() {
         e.preventDefault();
       });
 
+      // ── Realtime Sync ──
+      // When another user saves, reload objects automatically
+      let lastSaveTime = 0; // track our own saves to ignore them
+
+      const originalSaveProject = saveProject;
+      saveProject = async function() {
+        lastSaveTime = Date.now();
+        return originalSaveProject();
+      };
+
+      const channel = supabase
+        .channel(`project-${projectId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'projects',
+            filter: `id=eq.${projectId}`,
+          },
+          (payload: any) => {
+            // Ignore our own saves (within 2 seconds)
+            if (Date.now() - lastSaveTime < 2000) {
+              console.log('[realtime] ignoring own save');
+              return;
+            }
+
+            console.log('[realtime] project updated by another user, reloading...');
+            const newData = payload.new;
+            if (!newData) return;
+
+            const cs = newData.canvas_state || {};
+            // Don't override pan/zoom — keep our own viewport
+            objects = (newData.objects || []).map(normalizeObject);
+            nextId = objects.length ? Math.max(...objects.map(o => o.id)) + 1 : 1;
+            selectedIds.clear();
+            renderObjects();
+
+            // Flash a sync indicator
+            saveIndicator.textContent = 'Synced';
+            saveIndicator.classList.add('show');
+            setTimeout(() => {
+              saveIndicator.classList.remove('show');
+              saveIndicator.textContent = 'Saved';
+            }, 1500);
+          }
+        )
+        .subscribe((status: string) => {
+          console.log('[realtime] subscription status:', status);
+        });
+
       applyTransform();
       loadProject();
     })();
+
+    // Cleanup realtime subscription on unmount
+    return () => {
+      supabase.removeAllChannels();
+    };
   }, [projectId]);
 
   return (

@@ -1856,6 +1856,9 @@ function CanvasInner() {
         objects.push(normalizeObject({ id, type: 'shape', x: contextWorldX - 100, y: contextWorldY - 75, w: 200, h: 150, content: '', zIndex: mz }));
         selectObject(id); renderObjects(); markDirty();
       });
+      document.querySelector('[data-ctx-tool="markup"]')?.addEventListener('click', () => { hideContextMenu(); setTool('markup'); });
+      document.querySelector('[data-ctx-tool="draw"]')?.addEventListener('click', () => { hideContextMenu(); setTool('draw'); });
+      document.querySelector('[data-ctx-tool="eyedropper"]')?.addEventListener('click', () => { hideContextMenu(); setTool('eyedropper'); });
       ctxDelete?.addEventListener('click', () => { hideContextMenu(); deleteSelected(); });
       ctxBringFront?.addEventListener('click', () => {
         hideContextMenu();
@@ -2140,11 +2143,40 @@ function CanvasInner() {
             <div className="ctx-item" data-ctx-text="description">Description</div>
           </div>
         </div>
-        <div className="ctx-item" data-ctx-action="addRect">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="18" height="18" rx="1" />
-          </svg>
-          Add Rectangle
+        <div className="ctx-divider"></div>
+        <div className="ctx-sub">
+          <div className="ctx-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+            </svg>
+            Annotate <span className="arrow">&#9654;</span>
+          </div>
+          <div className="ctx-sub-menu">
+            <div className="ctx-item" data-ctx-action="addRect">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="1" />
+              </svg>
+              Rectangle
+            </div>
+            <div className="ctx-item" data-ctx-tool="markup">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 19l7-7 3 3-7 7-3-3z" /><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+              </svg>
+              Markup
+            </div>
+            <div className="ctx-item" data-ctx-tool="draw">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+              </svg>
+              Pen
+            </div>
+            <div className="ctx-item" data-ctx-tool="eyedropper">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20.71 5.63l-2.34-2.34a1 1 0 00-1.41 0l-3.54 3.54-1.41-1.41a1 1 0 00-1.42 0L9.17 6.83a1 1 0 000 1.42l1.41 1.41L3 17.25V21h3.75l7.59-7.58 1.41 1.41a1 1 0 001.42 0l1.41-1.41a1 1 0 000-1.42l-1.41-1.41 3.54-3.54a1 1 0 000-1.42z" />
+              </svg>
+              Eyedropper
+            </div>
+          </div>
         </div>
         <div className="ctx-divider" data-ctx-obj="true"></div>
         <div className="ctx-item" data-ctx-obj="true" data-ctx-action="bringFront">Bring to Front</div>

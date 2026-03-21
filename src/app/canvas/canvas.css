@@ -597,18 +597,19 @@ html, body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 .font-item {
-  padding: 12px 12px;
+  padding: 14px 12px;
   color: #ccc;
-  font-size: 15px;
+  font-size: 16px;
   cursor: pointer;
   border-radius: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  line-height: 1.6;
+  line-height: 1.8;
+  flex-shrink: 0;
 }
 .font-item:hover { background: #363636; color: #fff; }
 .font-item.selected { background: rgba(240, 196, 160, 0.2); color: var(--peach); }

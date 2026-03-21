@@ -1701,35 +1701,42 @@ function CanvasInner() {
         hideContextMenu();
         pushUndo();
         const [rw, rh] = ratio;
+        const targetRatio = rw / rh;
+
         for (const sid of selectedIds) {
           const o = objects.find(x => x.id === sid);
           if (o && o.type === 'image') {
-            // Store original dimensions if not already stored
+            // Store original display dimensions before any cropping
             if (!o.originalW) o.originalW = o.w;
             if (!o.originalH) o.originalH = o.h;
 
-            const origW = o.originalW || o.w;
-            const origH = o.originalH || o.h;
-            const targetRatio = rw / rh;
-            const currentRatio = origW / origH;
+            // Work in percentages (0-100) of the full source image
+            const currentRatio = o.originalW / o.originalH;
 
-            let cropW, cropH;
+            let cropWPct, cropHPct;
             if (currentRatio > targetRatio) {
-              // Too wide, crop width
-              cropH = origH;
-              cropW = cropH * targetRatio;
+              // Image is wider than target — crop width, keep full height
+              cropHPct = 100;
+              cropWPct = (targetRatio / currentRatio) * 100;
             } else {
-              // Too tall, crop height
-              cropW = origW;
-              cropH = cropW / targetRatio;
+              // Image is taller than target — crop height, keep full width
+              cropWPct = 100;
+              cropHPct = (currentRatio / targetRatio) * 100;
             }
 
-            const cropX = (origW - cropW) / 2;
-            const cropY = (origH - cropH) / 2;
+            const cropXPct = (100 - cropWPct) / 2;
+            const cropYPct = (100 - cropHPct) / 2;
 
-            o.crop = { x: cropX, y: cropY, w: cropW, h: cropH };
-            o.w = Math.round(cropW);
-            o.h = Math.round(cropH);
+            o.crop = { x: cropXPct, y: cropYPct, w: cropWPct, h: cropHPct };
+
+            // Resize object to match cropped aspect ratio
+            if (o.originalW > o.originalH) {
+              o.w = o.originalW;
+              o.h = Math.round(o.originalW / targetRatio);
+            } else {
+              o.h = o.originalH;
+              o.w = Math.round(o.originalH * targetRatio);
+            }
           }
         }
         renderObjects(); markDirty();

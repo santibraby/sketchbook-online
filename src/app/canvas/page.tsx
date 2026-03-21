@@ -1685,6 +1685,23 @@ function CanvasInner() {
         if (e.key === 'd' && !e.ctrlKey && !e.metaKey && !inEdit) setTool(activeTool === 'draw' ? 'pointer' : 'draw');
         if (e.key === 'i' && !e.ctrlKey && !e.metaKey && !inEdit) setTool(activeTool === 'eyedropper' ? 'pointer' : 'eyedropper');
         if (e.key === 'v' && !e.ctrlKey && !e.metaKey && !inEdit) setTool('pointer');
+        if (e.key === 'f' && !e.ctrlKey && !e.metaKey && !inEdit) {
+          const targets = selectedIds.size > 0 ? objects.filter(o => selectedIds.has(o.id)) : objects;
+          if (targets.length > 0) {
+            const minX = Math.min(...targets.map(o => o.x));
+            const minY = Math.min(...targets.map(o => o.y));
+            const maxX = Math.max(...targets.map(o => o.x + o.w));
+            const maxY = Math.max(...targets.map(o => o.y + o.h));
+            const bw = maxX - minX, bh = maxY - minY;
+            const vw = window.innerWidth - 52, vh = window.innerHeight;
+            const pad = 60;
+            zoom = Math.min((vw - pad * 2) / bw, (vh - pad * 2) / bh, 2);
+            zoom = Math.max(0.1, zoom);
+            panX = vw / 2 - (minX + bw / 2) * zoom;
+            panY = vh / 2 - (minY + bh / 2) * zoom;
+            applyTransform();
+          }
+        }
         if (e.key === 'a' && (e.ctrlKey || e.metaKey) && !inEdit) {
           e.preventDefault();
           objects.forEach(o => selectedIds.add(o.id));

@@ -1819,11 +1819,24 @@ function CanvasInner() {
         const fontList = document.getElementById('fontList');
         if (!fontList) return;
         fontList.innerHTML = '';
+
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const fontName = (entry.target as HTMLElement).dataset.font;
+              if (fontName) loadGoogleFont(fontName);
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { root: fontList, rootMargin: '100px' });
+
         GOOGLE_FONTS.forEach(font => {
           const item = document.createElement('div');
           item.className = 'font-item';
           item.textContent = font;
+          item.dataset.font = font;
           item.style.fontFamily = `"${font}", sans-serif`;
+          observer.observe(item);
           item.addEventListener('click', () => {
             pushUndo();
             loadGoogleFont(font);

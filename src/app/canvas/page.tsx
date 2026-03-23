@@ -1705,23 +1705,29 @@ function CanvasInner() {
         const resizeCheckbox = document.getElementById('ctxResizeCheck') as HTMLInputElement;
         const shouldResize = resizeCheckbox ? resizeCheckbox.checked : false;
 
+        // When resize is checked, calculate exact final size once
+        // Short side of the FINAL cropped image = 500px
+        let finalW, finalH;
+        if (shouldResize) {
+          if (targetRatio < 1) {
+            finalW = 500;
+            finalH = Math.round(500 / targetRatio);
+          } else if (targetRatio > 1) {
+            finalH = 500;
+            finalW = Math.round(500 * targetRatio);
+          } else {
+            finalW = 500;
+            finalH = 500;
+          }
+        }
+
         for (const sid of selectedIds) {
           const o = objects.find(x => x.id === sid);
           if (o && o.type === 'image') {
             if (!o.originalW) o.originalW = o.w;
             if (!o.originalH) o.originalH = o.h;
 
-            let baseW = o.originalW, baseH = o.originalH;
-            if (shouldResize) {
-              const shortSide = Math.min(baseW, baseH);
-              const scale = 500 / shortSide;
-              baseW = Math.round(baseW * scale);
-              baseH = Math.round(baseH * scale);
-              o.originalW = baseW;
-              o.originalH = baseH;
-            }
-
-            const currentRatio = baseW / baseH;
+            const currentRatio = o.originalW / o.originalH;
 
             let cropWPct, cropHPct;
             if (currentRatio > targetRatio) {
@@ -1737,10 +1743,15 @@ function CanvasInner() {
 
             o.crop = { x: cropXPct, y: cropYPct, w: cropWPct, h: cropHPct };
 
-            const croppedW = baseW * (cropWPct / 100);
-            const croppedH = baseH * (cropHPct / 100);
-            o.w = Math.round(croppedW);
-            o.h = Math.round(croppedH);
+            if (shouldResize) {
+              o.w = finalW;
+              o.h = finalH;
+            } else {
+              const croppedW = o.originalW * (cropWPct / 100);
+              const croppedH = o.originalH * (cropHPct / 100);
+              o.w = Math.round(croppedW);
+              o.h = Math.round(croppedH);
+            }
           }
         }
         renderObjects(); markDirty();

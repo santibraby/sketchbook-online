@@ -1714,7 +1714,7 @@ function CanvasInner() {
             let baseW = o.originalW, baseH = o.originalH;
             if (shouldResize) {
               const shortSide = Math.min(baseW, baseH);
-              const scale = 1000 / shortSide;
+              const scale = 500 / shortSide;
               baseW = Math.round(baseW * scale);
               baseH = Math.round(baseH * scale);
               o.originalW = baseW;
@@ -2515,7 +2515,7 @@ function CanvasInner() {
             <div className="ctx-sub-menu">
               <label className="ctx-item" style={{cursor:'pointer',gap:'8px'}}>
                 <input type="checkbox" id="ctxResizeCheck" style={{accentColor:'#F0C4A0',width:'14px',height:'14px',cursor:'pointer'}} />
-                <span style={{fontSize:'12px',color:'#888'}}>Resize (1000px)</span>
+                <span style={{fontSize:'12px',color:'#888'}}>Resize</span>
               </label>
               <div className="ctx-divider"></div>
               <div className="ctx-item" data-ctx-crop="34p">3:4 Portrait</div>

@@ -1790,6 +1790,85 @@ function CanvasInner() {
       });
       document.querySelector('[data-ctx-action="delete"]')?.addEventListener('click', () => { hideContextMenu(); deleteSelected(); });
 
+      // ── Align Functions ──
+      function getSelectedObjects() {
+        return objects.filter(o => selectedIds.has(o.id));
+      }
+
+      document.querySelector('[data-ctx-align="left"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const sel = getSelectedObjects();
+        if (sel.length < 2) return;
+        pushUndo();
+        const minX = Math.min(...sel.map(o => o.x));
+        sel.forEach(o => { o.x = minX; });
+        renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-align="right"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const sel = getSelectedObjects();
+        if (sel.length < 2) return;
+        pushUndo();
+        const maxRight = Math.max(...sel.map(o => o.x + o.w));
+        sel.forEach(o => { o.x = maxRight - o.w; });
+        renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-align="top"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const sel = getSelectedObjects();
+        if (sel.length < 2) return;
+        pushUndo();
+        const minY = Math.min(...sel.map(o => o.y));
+        sel.forEach(o => { o.y = minY; });
+        renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-align="bottom"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const sel = getSelectedObjects();
+        if (sel.length < 2) return;
+        pushUndo();
+        const maxBottom = Math.max(...sel.map(o => o.y + o.h));
+        sel.forEach(o => { o.y = maxBottom - o.h; });
+        renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-align="grid"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const sel = getSelectedObjects();
+        if (sel.length < 2) return;
+        pushUndo();
+
+        const count = sel.length;
+        const cols = Math.ceil(Math.sqrt(count));
+        const rows = Math.ceil(count / cols);
+        const maxW = Math.max(...sel.map(o => o.w));
+        const maxH = Math.max(...sel.map(o => o.h));
+        const gap = 20;
+
+        const minX = Math.min(...sel.map(o => o.x));
+        const minY = Math.min(...sel.map(o => o.y));
+        const totalW = cols * (maxW + gap) - gap;
+        const totalH = rows * (maxH + gap) - gap;
+        const selCenterX = minX + (Math.max(...sel.map(o => o.x + o.w)) - minX) / 2;
+        const selCenterY = minY + (Math.max(...sel.map(o => o.y + o.h)) - minY) / 2;
+        const startX = selCenterX - totalW / 2;
+        const startY = selCenterY - totalH / 2;
+
+        sel.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+        sel.forEach((o, i) => {
+          const col = i % cols;
+          const row = Math.floor(i / cols);
+          o.x = startX + col * (maxW + gap) + (maxW - o.w) / 2;
+          o.y = startY + row * (maxH + gap) + (maxH - o.h) / 2;
+        });
+
+        renderObjects(); markDirty();
+      });
+
       // ── Font Picker ──
       const GOOGLE_FONTS = [
         'Inter', 'Roboto', 'Open Sans', 'Lato', 'Montserrat', 'Oswald', 'Raleway', 'Poppins', 'Nunito', 'Merriweather',
@@ -2531,6 +2610,20 @@ function CanvasInner() {
         </div>
 
         {/* Common items for all object types */}
+        <div className="ctx-sub">
+          <div className="ctx-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="4" x2="4" y2="20"/><rect x="8" y="6" width="12" height="4" rx="1"/><rect x="8" y="14" width="8" height="4" rx="1"/></svg>
+            Align <span className="arrow">&#9654;</span>
+          </div>
+          <div className="ctx-sub-menu">
+            <div className="ctx-item" data-ctx-align="left">Align Left</div>
+            <div className="ctx-item" data-ctx-align="right">Align Right</div>
+            <div className="ctx-item" data-ctx-align="top">Align Top</div>
+            <div className="ctx-item" data-ctx-align="bottom">Align Bottom</div>
+            <div className="ctx-divider"></div>
+            <div className="ctx-item" data-ctx-align="grid">Arrange in Grid</div>
+          </div>
+        </div>
         <div className="ctx-item" data-ctx-action="bringFront">Bring to Front</div>
         <div className="ctx-item" data-ctx-action="sendBack">Send to Back</div>
         <div className="ctx-divider"></div>

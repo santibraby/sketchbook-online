@@ -1702,24 +1702,32 @@ function CanvasInner() {
         pushUndo();
         const [rw, rh] = ratio;
         const targetRatio = rw / rh;
+        const resizeCheckbox = document.getElementById('ctxResizeCheck') as HTMLInputElement;
+        const shouldResize = resizeCheckbox ? resizeCheckbox.checked : false;
 
         for (const sid of selectedIds) {
           const o = objects.find(x => x.id === sid);
           if (o && o.type === 'image') {
-            // Store original display dimensions before any cropping
             if (!o.originalW) o.originalW = o.w;
             if (!o.originalH) o.originalH = o.h;
 
-            // Work in percentages (0-100) of the full source image
-            const currentRatio = o.originalW / o.originalH;
+            let baseW = o.originalW, baseH = o.originalH;
+            if (shouldResize) {
+              const shortSide = Math.min(baseW, baseH);
+              const scale = 1000 / shortSide;
+              baseW = Math.round(baseW * scale);
+              baseH = Math.round(baseH * scale);
+              o.originalW = baseW;
+              o.originalH = baseH;
+            }
+
+            const currentRatio = baseW / baseH;
 
             let cropWPct, cropHPct;
             if (currentRatio > targetRatio) {
-              // Image is wider than target — crop width, keep full height
               cropHPct = 100;
               cropWPct = (targetRatio / currentRatio) * 100;
             } else {
-              // Image is taller than target — crop height, keep full width
               cropWPct = 100;
               cropHPct = (currentRatio / targetRatio) * 100;
             }
@@ -1729,14 +1737,10 @@ function CanvasInner() {
 
             o.crop = { x: cropXPct, y: cropYPct, w: cropWPct, h: cropHPct };
 
-            // Resize object to match cropped aspect ratio
-            if (o.originalW > o.originalH) {
-              o.w = o.originalW;
-              o.h = Math.round(o.originalW / targetRatio);
-            } else {
-              o.h = o.originalH;
-              o.w = Math.round(o.originalH * targetRatio);
-            }
+            const croppedW = baseW * (cropWPct / 100);
+            const croppedH = baseH * (cropHPct / 100);
+            o.w = Math.round(croppedW);
+            o.h = Math.round(croppedH);
           }
         }
         renderObjects(); markDirty();
@@ -2509,6 +2513,11 @@ function CanvasInner() {
               Crop <span className="arrow">&#9654;</span>
             </div>
             <div className="ctx-sub-menu">
+              <label className="ctx-item" style={{cursor:'pointer',gap:'8px'}}>
+                <input type="checkbox" id="ctxResizeCheck" style={{accentColor:'#F0C4A0',width:'14px',height:'14px',cursor:'pointer'}} />
+                <span style={{fontSize:'12px',color:'#888'}}>Resize (1000px)</span>
+              </label>
+              <div className="ctx-divider"></div>
               <div className="ctx-item" data-ctx-crop="34p">3:4 Portrait</div>
               <div className="ctx-item" data-ctx-crop="43l">4:3 Landscape</div>
               <div className="ctx-item" data-ctx-crop="35p">3:5 Portrait</div>

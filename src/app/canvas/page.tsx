@@ -1811,8 +1811,13 @@ function CanvasInner() {
         const sel = getSelectedObjects();
         if (sel.length < 2) return;
         pushUndo();
+        const gap = 20;
         const minX = Math.min(...sel.map(o => o.x));
-        sel.forEach(o => { o.x = minX; });
+        const centerY = (Math.min(...sel.map(o => o.y)) + Math.max(...sel.map(o => o.y + o.h))) / 2;
+        const totalH = sel.reduce((s, o) => s + o.h, 0) + gap * (sel.length - 1);
+        sel.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+        let curY = centerY - totalH / 2;
+        sel.forEach(o => { o.x = minX; o.y = curY; curY += o.h + gap; });
         renderObjects(); markDirty();
       });
 
@@ -1821,8 +1826,13 @@ function CanvasInner() {
         const sel = getSelectedObjects();
         if (sel.length < 2) return;
         pushUndo();
+        const gap = 20;
         const maxRight = Math.max(...sel.map(o => o.x + o.w));
-        sel.forEach(o => { o.x = maxRight - o.w; });
+        const centerY = (Math.min(...sel.map(o => o.y)) + Math.max(...sel.map(o => o.y + o.h))) / 2;
+        const totalH = sel.reduce((s, o) => s + o.h, 0) + gap * (sel.length - 1);
+        sel.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+        let curY = centerY - totalH / 2;
+        sel.forEach(o => { o.x = maxRight - o.w; o.y = curY; curY += o.h + gap; });
         renderObjects(); markDirty();
       });
 
@@ -1831,8 +1841,13 @@ function CanvasInner() {
         const sel = getSelectedObjects();
         if (sel.length < 2) return;
         pushUndo();
+        const gap = 20;
         const minY = Math.min(...sel.map(o => o.y));
-        sel.forEach(o => { o.y = minY; });
+        const centerX = (Math.min(...sel.map(o => o.x)) + Math.max(...sel.map(o => o.x + o.w))) / 2;
+        const totalW = sel.reduce((s, o) => s + o.w, 0) + gap * (sel.length - 1);
+        sel.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+        let curX = centerX - totalW / 2;
+        sel.forEach(o => { o.y = minY; o.x = curX; curX += o.w + gap; });
         renderObjects(); markDirty();
       });
 
@@ -1841,8 +1856,13 @@ function CanvasInner() {
         const sel = getSelectedObjects();
         if (sel.length < 2) return;
         pushUndo();
+        const gap = 20;
         const maxBottom = Math.max(...sel.map(o => o.y + o.h));
-        sel.forEach(o => { o.y = maxBottom - o.h; });
+        const centerX = (Math.min(...sel.map(o => o.x)) + Math.max(...sel.map(o => o.x + o.w))) / 2;
+        const totalW = sel.reduce((s, o) => s + o.w, 0) + gap * (sel.length - 1);
+        sel.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+        let curX = centerX - totalW / 2;
+        sel.forEach(o => { o.y = maxBottom - o.h; o.x = curX; curX += o.w + gap; });
         renderObjects(); markDirty();
       });
 

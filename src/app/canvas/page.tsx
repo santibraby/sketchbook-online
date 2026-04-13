@@ -31,21 +31,87 @@ interface CanvasObject {
   artboardRatio?: string;
 }
 
+const MAX_HIRES_BYTES = 5 * 1024 * 1024; // 5MB cap for hi-res uploads
+
+async function compressHiRes(file: File): Promise<File | null> {
+  // If already under cap, return as-is
+  if (file.size <= MAX_HIRES_BYTES) return file;
+
+  const hasTransparency = file.type === 'image/png' || file.type === 'image/webp' || file.type === 'image/gif';
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = async () => {
+      let scale = 1.0;
+      let quality = 0.95;
+      const origW = img.naturalWidth, origH = img.naturalHeight;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+
+      const tryEncode = (s: number, q: number, mime: string): Promise<Blob | null> => {
+        return new Promise((res) => {
+          canvas.width = Math.round(origW * s);
+          canvas.height = Math.round(origH * s);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          canvas.toBlob((b) => res(b), mime, q);
+        });
+      };
+
+      const mime = hasTransparency ? 'image/png' : 'image/jpeg';
+      let blob: Blob | null = await tryEncode(scale, quality, mime);
+
+      // For JPEG: reduce quality first
+      if (!hasTransparency) {
+        while (blob && blob.size > MAX_HIRES_BYTES && quality > 0.6) {
+          quality -= 0.05;
+          blob = await tryEncode(scale, quality, mime);
+        }
+      }
+      // For both: reduce scale if still too big
+      while (blob && blob.size > MAX_HIRES_BYTES && scale > 0.2) {
+        scale -= 0.05;
+        blob = await tryEncode(scale, quality, mime);
+      }
+
+      if (!blob) { resolve(null); return; }
+      const ext = hasTransparency ? 'png' : 'jpg';
+      resolve(new File([blob], `hires.${ext}`, { type: mime }));
+    };
+    img.onerror = () => resolve(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 async function uploadImage(
   file: File,
   projectId: string,
-  supabase: any
+  supabase: any,
+  options?: { hiRes?: boolean }
 ): Promise<{ path: string; width: number; height: number } | null> {
+  const hiRes = !!options?.hiRes;
   let imageFile = file;
+  let ext = 'jpg';
 
-  if (file.size > 2 * 1024 * 1024) {
-    const resized = await resizeImage(file);
-    if (!resized) return null;
-    imageFile = resized;
-  } else if (file.type !== 'image/jpeg') {
-    const converted = await convertToJpeg(file);
-    if (!converted) return null;
-    imageFile = converted;
+  if (hiRes) {
+    // Cap hi-res at 5MB — compress only if larger
+    const compressed = await compressHiRes(file);
+    if (!compressed) return null;
+    imageFile = compressed;
+    // Preserve extension (PNG transparency preserved if applicable)
+    const m = /\.([a-zA-Z0-9]+)$/.exec(imageFile.name);
+    ext = m ? m[1].toLowerCase() : (imageFile.type.split('/')[1] || 'jpg');
+  } else {
+    if (file.size > 2 * 1024 * 1024) {
+      const resized = await resizeImage(file);
+      if (!resized) return null;
+      imageFile = resized;
+    } else if (file.type !== 'image/jpeg') {
+      const converted = await convertToJpeg(file);
+      if (!converted) return null;
+      imageFile = converted;
+    }
   }
 
   const dimensions = await getImageDimensions(imageFile);
@@ -53,8 +119,8 @@ async function uploadImage(
   const { width, height } = dimensions;
 
   const timestamp = Date.now();
-  const path = `${projectId}/${timestamp}.jpg`;
-  const { error } = await supabase.storage.from('project-assets').upload(path, imageFile, { upsert: false });
+  const path = `${projectId}/${timestamp}.${ext}`;
+  const { error } = await supabase.storage.from('project-assets').upload(path, imageFile, { upsert: false, contentType: imageFile.type || undefined });
 
   if (error) return null;
   return { path, width, height };
@@ -1621,7 +1687,7 @@ function CanvasInner() {
         }
       });
 
-      function addImages(wx?: number, wy?: number) {
+      function addImages(wx?: number, wy?: number, hiRes: boolean = false) {
         const input = document.createElement('input');
         input.type = 'file';
         input.multiple = true;
@@ -1634,11 +1700,13 @@ function CanvasInner() {
           let count = 0;
           for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            const result = await uploadImage(file, projectId!, supabase);
+            const result = await uploadImage(file, projectId!, supabase, { hiRes });
             if (!result) continue;
             let w = result.width, h = result.height;
-            if (w > 600) { const s = 600 / w; w = 600; h = Math.round(h * s); }
-            if (h > 500) { const s = 500 / h; h = Math.round(h * s); w = Math.round(w * s); }
+            if (!hiRes) {
+              if (w > 600) { const s = 600 / w; w = 600; h = Math.round(h * s); }
+              if (h > 500) { const s = 500 / h; h = Math.round(h * s); w = Math.round(w * s); }
+            }
             const id = nextId++;
             const mz = objects.length ? Math.max(...objects.map(o => o.zIndex)) + 1 : 1;
             objects.push(normalizeObject({
@@ -1868,7 +1936,8 @@ function CanvasInner() {
       document.querySelector('[data-toolbar="save"]')?.addEventListener('click', () => saveProject());
 
       // Canvas Menu handlers
-      document.querySelector('[data-ctx-action="addImages"]')?.addEventListener('click', () => { hideContextMenu(); addImages(contextWorldX, contextWorldY); });
+      document.querySelector('[data-ctx-action="addImages"]')?.addEventListener('click', () => { hideContextMenu(); addImages(contextWorldX, contextWorldY, false); });
+      document.querySelector('[data-ctx-action="addImagesHiRes"]')?.addEventListener('click', () => { hideContextMenu(); addImages(contextWorldX, contextWorldY, true); });
       document.querySelector('[data-ctx-text="title"]')?.addEventListener('click', () => { hideContextMenu(); addText('title', contextWorldX, contextWorldY); });
       document.querySelector('[data-ctx-text="subtitle"]')?.addEventListener('click', () => { hideContextMenu(); addText('subtitle', contextWorldX, contextWorldY); });
       document.querySelector('[data-ctx-text="description"]')?.addEventListener('click', () => { hideContextMenu(); addText('description', contextWorldX, contextWorldY); });
@@ -2910,13 +2979,19 @@ function CanvasInner() {
 
       {/* Canvas Context Menu (right-click on empty space) */}
       <div id="canvasMenu">
-        <div className="ctx-item" data-ctx-action="addImages">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
-          Add Images
+        <div className="ctx-sub">
+          <div className="ctx-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="M21 15l-5-5L5 21" />
+            </svg>
+            Add Images <span className="arrow">&#9654;</span>
+          </div>
+          <div className="ctx-sub-menu">
+            <div className="ctx-item" data-ctx-action="addImages">Add Image</div>
+            <div className="ctx-item" data-ctx-action="addImagesHiRes">Add Hi-Res Image</div>
+          </div>
         </div>
         <div className="ctx-sub">
           <div className="ctx-item">

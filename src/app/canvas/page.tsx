@@ -8,7 +8,7 @@ import './canvas.css';
 
 interface CanvasObject {
   id: number;
-  type: 'image' | 'text' | 'shape' | 'drawing' | 'markup' | 'swatch';
+  type: 'image' | 'text' | 'shape' | 'drawing' | 'markup' | 'swatch' | 'artboard';
   x: number;
   y: number;
   w: number;
@@ -27,6 +27,8 @@ interface CanvasObject {
   textColor?: string;
   originalW?: number;
   originalH?: number;
+  artboardLabel?: string | null;
+  artboardRatio?: string;
 }
 
 async function uploadImage(
@@ -184,6 +186,23 @@ function CanvasInner() {
       let spaceDown = false;
       let saveTimer: NodeJS.Timeout | null = null;
 
+      // ── Artboard constants (150 DPI) ──
+      const ARTBOARD_SIZES: Record<string, {w: number; h: number}> = {
+        '1:1':   { w: 1500, h: 1500 },  // 10 × 10 in
+        '16:9':  { w: 2400, h: 1350 },  // 16 × 9 in
+        '17:11': { w: 2550, h: 1650 },  // 17 × 11 in (tabloid)
+      };
+      const ARTBOARD_DPI = 150;
+      // Export at 300 DPI (2× canvas size)
+      const ARTBOARD_EXPORT_SIZES: Record<string, {w: number; h: number}> = {
+        '1:1':   { w: 3000, h: 3000 },
+        '16:9':  { w: 4800, h: 2700 },
+        '17:11': { w: 5100, h: 3300 },
+      };
+
+      // In-memory object clipboard for Ctrl+C / Ctrl+V
+      let copiedObjectsJSON: string | null = null;
+
       function markDirty() {
         if (saveTimer) clearTimeout(saveTimer);
         saveTimer = setTimeout(() => saveProject(), 500);
@@ -270,6 +289,9 @@ function CanvasInner() {
         cloud: null, leader: null, markupText: '',
         fontFamily: null, textColor: null,
         originalW: null, originalH: null,
+        // artboard fields
+        artboardLabel: null as string | null, artboardRatio: '1:1' as string,
+        artboardTitle: '' as string, artboardFooter: '' as string,
       };
 
       function normalizeObject(obj: any): CanvasObject {
@@ -278,7 +300,7 @@ function CanvasInner() {
         o.y = Number(o.y) || 0;
         o.w = Number(o.w) || 200;
         o.h = Number(o.h) || 150;
-        o.zIndex = Number(o.zIndex) || 1;
+        o.zIndex = o.type === 'artboard' ? 0 : Math.max(Number(o.zIndex) || 1, 1);
         return o;
       }
 
@@ -583,6 +605,49 @@ function CanvasInner() {
             }
             textDiv.textContent = obj.markupText || 'Note';
             el.appendChild(textDiv);
+          } else if (obj.type === 'artboard') {
+            el.classList.add('artboard-obj');
+            const label = document.createElement('div');
+            label.className = 'artboard-label';
+            label.textContent = `Artboard ${obj.artboardLabel || 'A'}`;
+            el.appendChild(label);
+
+            // Editable title (top-left)
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'artboard-title';
+            titleDiv.contentEditable = 'true';
+            titleDiv.dataset.placeholder = 'Title';
+            titleDiv.textContent = obj.artboardTitle || '';
+            titleDiv.addEventListener('blur', () => {
+              const newText = titleDiv.textContent || '';
+              if (newText !== obj.artboardTitle) {
+                pushUndo();
+                obj.artboardTitle = newText;
+                markDirty();
+              }
+            });
+            titleDiv.addEventListener('mousedown', (ev: Event) => ev.stopPropagation());
+            titleDiv.addEventListener('keydown', (ev: KeyboardEvent) => { if (ev.key === 'Escape') titleDiv.blur(); });
+            el.appendChild(titleDiv);
+
+            // Editable footer (bottom-left)
+            const footerDiv = document.createElement('div');
+            footerDiv.className = 'artboard-footer';
+            footerDiv.contentEditable = 'true';
+            footerDiv.dataset.placeholder = 'Footer';
+            footerDiv.textContent = obj.artboardFooter || '';
+            footerDiv.addEventListener('blur', () => {
+              const newText = footerDiv.textContent || '';
+              if (newText !== obj.artboardFooter) {
+                pushUndo();
+                obj.artboardFooter = newText;
+                markDirty();
+              }
+            });
+            footerDiv.addEventListener('mousedown', (ev: Event) => ev.stopPropagation());
+            footerDiv.addEventListener('keydown', (ev: KeyboardEvent) => { if (ev.key === 'Escape') footerDiv.blur(); });
+            el.appendChild(footerDiv);
+
           } else if (obj.type === 'swatch') {
             el.classList.add('swatch-obj');
             const hex = (obj.content || '#888888').toUpperCase();
@@ -1530,11 +1595,14 @@ function CanvasInner() {
         const selectedObj = objects.find(o => selectedIds.has(o.id));
         const isText = selectedObj && selectedObj.type === 'text';
         const isImage = selectedObj && selectedObj.type === 'image';
+        const isArtboard = selectedObj && selectedObj.type === 'artboard';
 
         const textSection = document.getElementById('textObjectSection');
         const imageSection = document.getElementById('imageObjectSection');
+        const artboardSection = document.querySelector('[data-section="artboard"]') as HTMLElement;
         if (textSection) textSection.style.display = isText ? 'block' : 'none';
         if (imageSection) imageSection.style.display = isImage ? 'block' : 'none';
+        if (artboardSection) artboardSection.style.display = isArtboard ? 'block' : 'none';
 
         let x = e.clientX, y = e.clientY;
         if (x + 190 > window.innerWidth) x = window.innerWidth - 190;
@@ -1613,6 +1681,184 @@ function CanvasInner() {
         selectedIds.clear();
         renderObjects(); markDirty();
       }
+
+      // ── Artboard Functions ──
+
+      function nextArtboardLabel(): string {
+        const used = new Set(objects.filter(o => o.type === 'artboard').map(o => o.artboardLabel));
+        for (let i = 0; i < 26; i++) {
+          const ch = String.fromCharCode(65 + i);
+          if (!used.has(ch)) return ch;
+        }
+        return 'A';
+      }
+
+      function setArtboardRatio(ratio: string) {
+        hideContextMenu();
+        pushUndo();
+        const sz = ARTBOARD_SIZES[ratio];
+        if (!sz) return;
+        for (const sid of selectedIds) {
+          const o = objects.find(x => x.id === sid);
+          if (o && o.type === 'artboard') {
+            // Keep center position
+            const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+            o.w = sz.w; o.h = sz.h;
+            o.x = cx - sz.w / 2; o.y = cy - sz.h / 2;
+            o.artboardRatio = ratio;
+          }
+        }
+        renderObjects(); markDirty();
+      }
+
+      async function exportArtboard(ab: CanvasObject) {
+        const sz = ARTBOARD_EXPORT_SIZES[ab.artboardRatio || '1:1'] || ARTBOARD_EXPORT_SIZES['1:1'];
+        const exportW = sz.w, exportH = sz.h;
+        const scaleX = exportW / ab.w, scaleY = exportH / ab.h;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = exportW; canvas.height = exportH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        // Dark background
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, exportW, exportH);
+        // Grid lines (40px in world coords, scaled to export)
+        const gridStep = 40 * scaleX;
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        const gridOffX = ((ab.x % 40) * scaleX);
+        const gridOffY = ((ab.y % 40) * scaleY);
+        for (let gx = -gridOffX; gx <= exportW; gx += gridStep) {
+          ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, exportH); ctx.stroke();
+        }
+        for (let gy = -gridOffY; gy <= exportH; gy += gridStep) {
+          ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(exportW, gy); ctx.stroke();
+        }
+
+        // Gather overlapping objects (sorted by zIndex, exclude artboards)
+        const overlapping = objects.filter(o =>
+          o.id !== ab.id && o.type !== 'artboard' &&
+          o.x + o.w > ab.x && o.x < ab.x + ab.w &&
+          o.y + o.h > ab.y && o.y < ab.y + ab.h
+        ).sort((a, b) => a.zIndex - b.zIndex);
+
+        for (const obj of overlapping) {
+          const ox = (obj.x - ab.x) * scaleX;
+          const oy = (obj.y - ab.y) * scaleY;
+          const ow = obj.w * scaleX;
+          const oh = obj.h * scaleY;
+
+          ctx.save();
+          // Clip to artboard bounds
+          ctx.beginPath();
+          ctx.rect(0, 0, exportW, exportH);
+          ctx.clip();
+
+          if (obj.type === 'image') {
+            const imgEl = world.querySelector(`[data-id="${obj.id}"] img`) as HTMLImageElement;
+            if (imgEl && imgEl.complete && imgEl.naturalWidth) {
+              try {
+                if (obj.crop) {
+                  const sx = (obj.crop.x / 100) * imgEl.naturalWidth;
+                  const sy = (obj.crop.y / 100) * imgEl.naturalHeight;
+                  const sw = (obj.crop.w / 100) * imgEl.naturalWidth;
+                  const sh = (obj.crop.h / 100) * imgEl.naturalHeight;
+                  ctx.drawImage(imgEl, sx, sy, sw, sh, ox, oy, ow, oh);
+                } else {
+                  ctx.drawImage(imgEl, 0, 0, imgEl.naturalWidth, imgEl.naturalHeight, ox, oy, ow, oh);
+                }
+              } catch (_) { /* cross-origin fallback: skip */ }
+            }
+          } else if (obj.type === 'text') {
+            const styles: Record<string, {size: number; weight: string; family: string; style?: string}> = {
+              title: { size: 42, weight: '600', family: 'serif' },
+              subtitle: { size: 24, weight: '400', family: 'serif', style: 'italic' },
+              description: { size: 14, weight: '400', family: 'sans-serif' }
+            };
+            const s = styles[obj.textStyle || 'title'] || styles.title;
+            const family = obj.fontFamily || s.family;
+            const italic = s.style === 'italic' ? 'italic ' : '';
+            ctx.font = `${italic}${s.weight} ${s.size * scaleX}px ${family}`;
+            ctx.fillStyle = obj.textColor || '#e0e0e0';
+            // Simple word-wrap
+            const words = (obj.content || '').split(' ');
+            let line = '', lineY = oy + s.size * scaleX;
+            for (const word of words) {
+              const testLine = line ? line + ' ' + word : word;
+              if (ctx.measureText(testLine).width > ow && line) {
+                ctx.fillText(line, ox, lineY);
+                line = word; lineY += s.size * scaleX * 1.3;
+              } else { line = testLine; }
+            }
+            if (line) ctx.fillText(line, ox, lineY);
+          } else if (obj.type === 'shape') {
+            ctx.fillStyle = 'rgba(240, 196, 160, 0.3)';
+            ctx.strokeStyle = '#F0C4A0';
+            ctx.lineWidth = 2 * scaleX;
+            ctx.fillRect(ox, oy, ow, oh);
+            ctx.strokeRect(ox, oy, ow, oh);
+          } else if (obj.type === 'drawing' && obj.points && obj.points.length > 1) {
+            ctx.strokeStyle = obj.strokeColor || '#F0C4A0';
+            ctx.lineWidth = (obj.strokeWidth || 4) * scaleX;
+            ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(ox + obj.points[0].x * scaleX, oy + obj.points[0].y * scaleY);
+            for (let i = 1; i < obj.points.length; i++) {
+              ctx.lineTo(ox + obj.points[i].x * scaleX, oy + obj.points[i].y * scaleY);
+            }
+            ctx.stroke();
+          } else if (obj.type === 'swatch') {
+            const hex = (obj.content || '#888888').toUpperCase();
+            ctx.fillStyle = hex;
+            ctx.beginPath();
+            ctx.arc(ox + ow / 2, oy + oh / 2, Math.min(ow, oh) / 2, 0, Math.PI * 2);
+            ctx.fill();
+            // Hex label centered on swatch
+            const fontSize = Math.round(Math.min(ow, oh) * 0.18);
+            ctx.font = `600 ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const rr = parseInt(hex.slice(1,3),16), gg = parseInt(hex.slice(3,5),16), bb = parseInt(hex.slice(5,7),16);
+            const lum = (0.299 * rr + 0.587 * gg + 0.114 * bb) / 255;
+            ctx.fillStyle = lum > 0.55 ? '#1a1a1a' : '#ffffff';
+            ctx.fillText(hex, ox + ow / 2, oy + oh / 2);
+          }
+          ctx.restore();
+        }
+
+        // Draw artboard title (top-left, 30px inset)
+        if (ab.artboardTitle) {
+          const tSize = Math.round(42 * scaleX);
+          ctx.font = `600 ${tSize}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.fillStyle = '#f0f0f0';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(ab.artboardTitle, 30 * scaleX, 30 * scaleY);
+        }
+
+        // Draw artboard footer (bottom-left, 30px inset)
+        if (ab.artboardFooter) {
+          const fSize = Math.round(24 * scaleX);
+          ctx.font = `400 ${fSize}px Inter, -apple-system, BlinkMacSystemFont, sans-serif`;
+          ctx.fillStyle = '#cccccc';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(ab.artboardFooter, 30 * scaleX, exportH - 30 * scaleY);
+        }
+
+        // Export as JPEG and download
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Artboard ${ab.artboardLabel || 'A'}.jpg`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, 'image/jpeg', 0.92);
+      }
+
 
       document.querySelector('[data-toolbar="home"]')?.addEventListener('click', async () => { if (objects.length > 0) await saveProject(); router.push('/'); });
       document.querySelector('[data-toolbar="addImage"]')?.addEventListener('click', () => addImages());
@@ -1774,6 +2020,96 @@ function CanvasInner() {
           }
         }
         renderObjects(); markDirty();
+      });
+
+
+      // Artboard menu handlers
+      document.querySelector('[data-ctx-action="addArtboard"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        pushUndo();
+        const id = nextId++;
+        const label = nextArtboardLabel();
+        const ratio = '16:9'; // default proportion
+        const sz = ARTBOARD_SIZES[ratio];
+        objects.push(normalizeObject({
+          id, type: 'artboard' as const,
+          x: contextWorldX - sz.w / 2, y: contextWorldY - sz.h / 2,
+          w: sz.w, h: sz.h,
+          artboardLabel: label, artboardRatio: ratio, zIndex: 0,
+        }));
+        selectObject(id); renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-artboard="11"]')?.addEventListener('click', () => setArtboardRatio('1:1'));
+      document.querySelector('[data-ctx-artboard="169"]')?.addEventListener('click', () => setArtboardRatio('16:9'));
+      document.querySelector('[data-ctx-artboard="1711"]')?.addEventListener('click', () => setArtboardRatio('17:11'));
+
+      document.querySelector('[data-ctx-action="exportArtboard"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        const ab = objects.find(o => selectedIds.has(o.id) && o.type === 'artboard');
+        if (!ab) return;
+        exportArtboard(ab);
+      });
+
+      // Remove White Background (image only – client-side pixel processing)
+      document.querySelector('[data-ctx-action="removeWhiteBg"]')?.addEventListener('click', async () => {
+        hideContextMenu();
+        const obj = objects.find(o => selectedIds.has(o.id) && o.type === 'image');
+        if (!obj) return;
+
+        try {
+          // 1. Load the image
+          const { data: urlData } = supabase.storage.from('project-assets').getPublicUrl(obj.content);
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          await new Promise<void>((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.src = urlData.publicUrl;
+          });
+
+          // 2. Draw to offscreen canvas and process pixels
+          const cvs = document.createElement('canvas');
+          cvs.width = img.naturalWidth;
+          cvs.height = img.naturalHeight;
+          const ctx2 = cvs.getContext('2d')!;
+          ctx2.drawImage(img, 0, 0);
+          const imageData = ctx2.getImageData(0, 0, cvs.width, cvs.height);
+          const px = imageData.data;
+          const threshold = 240;
+          for (let i = 0; i < px.length; i += 4) {
+            if (px[i] >= threshold && px[i + 1] >= threshold && px[i + 2] >= threshold) {
+              px[i + 3] = 0; // set alpha to 0
+            }
+          }
+          ctx2.putImageData(imageData, 0, 0);
+
+          // 3. Export as PNG blob
+          const blob: Blob = await new Promise((resolve) => {
+            cvs.toBlob((b) => resolve(b!), 'image/png');
+          });
+
+          // 4. Upload to Supabase storage
+          const timestamp = Date.now();
+          const storagePath = `${projectId}/${timestamp}_nobg.png`;
+          const { error: uploadErr } = await supabase.storage
+            .from('project-assets')
+            .upload(storagePath, blob, { upsert: false, contentType: 'image/png' });
+          if (uploadErr) { console.error('Upload error:', uploadErr); return; }
+
+          // 5. Update the object
+          pushUndo();
+          obj.content = storagePath;
+          obj.crop = undefined; // reset crop since dimensions may differ
+          obj.w = cvs.width;
+          obj.h = cvs.height;
+          obj.originalW = cvs.width;
+          obj.originalH = cvs.height;
+          renderObjects();
+          markDirty();
+        } catch (err) {
+          console.error('Remove white bg error:', err);
+        }
       });
 
       // Common object menu handlers
@@ -2119,40 +2455,83 @@ function CanvasInner() {
         if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !inEdit) { e.preventDefault(); undo(); }
         if ((e.key === 'y' && (e.ctrlKey || e.metaKey) && !inEdit) || (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey && !inEdit)) { e.preventDefault(); redo(); }
         if (e.key === 's' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveProject(); }
+
+        // ── Ctrl+C: copy selected canvas objects to in-memory clipboard ──
+        if ((e.key === 'c' || e.key === 'C') && (e.ctrlKey || e.metaKey) && !inEdit) {
+          if (selectedIds.size === 0) return;
+          const toCopy = objects.filter(o => selectedIds.has(o.id));
+          if (toCopy.length === 0) return;
+          copiedObjectsJSON = JSON.stringify(toCopy);
+          e.preventDefault();
+        }
       });
 
       document.addEventListener('keyup', (e: KeyboardEvent) => {
         if (e.code === 'Space') { spaceDown = false; viewport.classList.remove('panning'); }
       });
 
+      // ── Paste (Ctrl+V) ──
+      // First tries to paste canvas objects from the in-memory clipboard
+      // (populated by Ctrl+C). If nothing was copied in-app, falls back
+      // to pasting an image from the browser clipboard.
       document.addEventListener('keydown', async (e2: KeyboardEvent) => {
-        if (e2.key === 'v' && (e2.ctrlKey || e2.metaKey) && !(e2.target as HTMLElement).closest('[contenteditable]')) {
-          const clipboardItems = await navigator.clipboard.read();
-          for (const item of clipboardItems) {
-            const imageTypes = item.types.filter(t => t.startsWith('image/'));
-            if (imageTypes.length === 0) continue;
-            e2.preventDefault();
-            const blob = await item.getType(imageTypes[0]);
-            const file = new File([blob], 'clipboard.png', { type: blob.type });
-            const result = await uploadImage(file, projectId!, supabase);
-            if (!result) return;
-            pushUndo();
-            let w = result.width, h = result.height;
-            if (w > 600) { const s = 600 / w; w = 600; h = Math.round(h * s); }
-            if (h > 500) { const s = 500 / h; h = Math.round(h * s); w = Math.round(w * s); }
-            const center = viewportCenter();
-            const id = nextId++;
-            const mz = objects.length ? Math.max(...objects.map(o => o.zIndex)) + 1 : 1;
-            objects.push(normalizeObject({
-              id, type: 'image',
-              x: center.x - w / 2, y: center.y - h / 2,
-              w, h, content: result.path, zIndex: mz,
-            }));
-            selectObject(id);
-            renderObjects();
-            markDirty();
-            break;
-          }
+        if (e2.key !== 'v' && e2.key !== 'V') return;
+        if (!(e2.ctrlKey || e2.metaKey)) return;
+        const tgt = e2.target as HTMLElement | null;
+        if (tgt && typeof tgt.closest === 'function' && tgt.closest('[contenteditable]')) return;
+
+        // 1) Paste copied canvas objects, if any
+        if (copiedObjectsJSON) {
+          e2.preventDefault();
+          let src: CanvasObject[] | null = null;
+          try { src = JSON.parse(copiedObjectsJSON); } catch (_) { src = null; }
+          if (!src || src.length === 0) return;
+          pushUndo();
+          const offset = 20;
+          const baseZ = objects.length ? Math.max(...objects.map(o => o.zIndex)) : 0;
+          const newIds: number[] = [];
+          src.forEach((orig, i) => {
+            const clone = JSON.parse(JSON.stringify(orig));
+            clone.id = nextId++;
+            clone.x = (Number(orig.x) || 0) + offset;
+            clone.y = (Number(orig.y) || 0) + offset;
+            clone.zIndex = baseZ + 1 + i;
+            objects.push(normalizeObject(clone));
+            newIds.push(clone.id);
+          });
+          selectedIds.clear();
+          newIds.forEach(id => selectedIds.add(id));
+          renderObjects();
+          markDirty();
+          return;
+        }
+
+        // 2) Fall back to pasting an image from the browser clipboard
+        const clipboardItems = await navigator.clipboard.read();
+        for (const item of clipboardItems) {
+          const imageTypes = item.types.filter(t => t.startsWith('image/'));
+          if (imageTypes.length === 0) continue;
+          e2.preventDefault();
+          const blob = await item.getType(imageTypes[0]);
+          const file = new File([blob], 'clipboard.png', { type: blob.type });
+          const result = await uploadImage(file, projectId!, supabase);
+          if (!result) return;
+          pushUndo();
+          let w = result.width, h = result.height;
+          if (w > 600) { const s = 600 / w; w = 600; h = Math.round(h * s); }
+          if (h > 500) { const s = 500 / h; h = Math.round(h * s); w = Math.round(w * s); }
+          const center = viewportCenter();
+          const id = nextId++;
+          const mz = objects.length ? Math.max(...objects.map(o => o.zIndex)) + 1 : 1;
+          objects.push(normalizeObject({
+            id, type: 'image',
+            x: center.x - w / 2, y: center.y - h / 2,
+            w, h, content: result.path, zIndex: mz,
+          }));
+          selectObject(id);
+          renderObjects();
+          markDirty();
+          break;
         }
       });
 
@@ -2553,6 +2932,12 @@ function CanvasInner() {
             <div className="ctx-item" data-ctx-text="description">Description</div>
           </div>
         </div>
+        <div className="ctx-item" data-ctx-action="addArtboard">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 2">
+            <rect x="3" y="3" width="18" height="18" rx="1" />
+          </svg>
+          Add Artboard
+        </div>
         <div className="ctx-divider"></div>
         <div className="ctx-sub">
           <div className="ctx-item">
@@ -2636,6 +3021,36 @@ function CanvasInner() {
               <div className="ctx-divider"></div>
               <div className="ctx-item" data-ctx-crop="reset">Reset Crop</div>
             </div>
+          </div>
+          <div className="ctx-item" data-ctx-action="removeWhiteBg">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="3" x2="21" y2="21"/></svg>
+            Remove White Background
+          </div>
+          <div className="ctx-divider"></div>
+        </div>
+
+        {/* Artboard object menu items */}
+        <div data-section="artboard" style={{ display: 'none' }}>
+          <div className="ctx-sub">
+            <div className="ctx-item">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="1" />
+              </svg>
+              Proportion <span className="arrow">&#9654;</span>
+            </div>
+            <div className="ctx-sub-menu">
+              <div className="ctx-item" data-ctx-artboard="11">1:1 (10×10 in)</div>
+              <div className="ctx-item" data-ctx-artboard="169">16:9 (16×9 in)</div>
+              <div className="ctx-item" data-ctx-artboard="1711">17:11 Tabloid</div>
+            </div>
+          </div>
+          <div className="ctx-item" data-ctx-action="exportArtboard">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export Artboard
           </div>
           <div className="ctx-divider"></div>
         </div>

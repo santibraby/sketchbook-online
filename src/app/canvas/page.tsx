@@ -1240,13 +1240,28 @@ function CanvasInner() {
           const obj = objects.find(o => o.id === id);
           if (!obj) return;
           pushUndo();
-          selectObject(id);
+          // Don't clear multi-selection when grabbing a handle — allow group scaling
+          if (!selectedIds.has(id)) selectObject(id);
 
           const sx = e.clientX, sy = e.clientY;
           const ox = obj.x, oy = obj.y, ow = obj.w, oh = obj.h;
           const hp = handle.dataset.handle!;
           const isImg = obj.type === 'image';
           const ar = ow / oh;
+
+          // ── Multi-object group scaling ──
+          const groupIds = Array.from(selectedIds).filter(sid => sid !== id);
+          const isGroup = groupIds.length > 0;
+          const origins = new Map<number, { x: number; y: number; w: number; h: number }>();
+          if (isGroup) {
+            for (const sid of selectedIds) {
+              const so = objects.find(o => o.id === sid);
+              if (so) origins.set(sid, { x: so.x, y: so.y, w: so.w, h: so.h });
+            }
+          }
+          // Anchor = opposite corner of primary (stays fixed during scale)
+          const anchorX = hp.includes('l') ? ox + ow : ox;
+          const anchorY = hp.includes('t') ? oy + oh : oy;
 
           function onMove(ev: MouseEvent) {
             const dx = (ev.clientX - sx) / zoom, dy = (ev.clientY - sy) / zoom;
@@ -1255,7 +1270,7 @@ function CanvasInner() {
             if (hp.includes('l')) { nx = ox + dx; nw = ow - dx; }
             if (hp.includes('b')) nh = oh + dy;
             if (hp.includes('t')) { ny = oy + dy; nh = oh - dy; }
-            if (isImg || ev.shiftKey) {
+            if (isGroup || isImg || ev.shiftKey) {
               if (Math.abs(dx) > Math.abs(dy)) {
                 nh = nw / ar; if (hp.includes('t')) ny = oy + oh - nh;
               } else {
@@ -1265,6 +1280,22 @@ function CanvasInner() {
             obj.x = nx; obj.y = ny; obj.w = nw; obj.h = nh;
             const s = snapResize(obj, hp);
             obj.x = s.x; obj.y = s.y; obj.w = s.w; obj.h = s.h;
+
+            if (isGroup) {
+              const scale = obj.w / ow;
+              if (isFinite(scale) && scale > 0) {
+                for (const sid of groupIds) {
+                  const so = objects.find(o => o.id === sid);
+                  const orig = origins.get(sid);
+                  if (!so || !orig) continue;
+                  so.w = orig.w * scale;
+                  so.h = orig.h * scale;
+                  so.x = anchorX + (orig.x - anchorX) * scale;
+                  so.y = anchorY + (orig.y - anchorY) * scale;
+                }
+              }
+            }
+
             renderObjects(); markDirty();
           }
           function onUp() { clearGuides(); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
@@ -1780,6 +1811,48 @@ function CanvasInner() {
       }
 
       async function exportArtboard(ab: CanvasObject) {
+        const canvas = renderArtboardCanvas(ab);
+        if (!canvas) return;
+        canvas.toBlob((blob) => {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `Artboard ${ab.artboardLabel || 'A'}.jpg`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, 'image/jpeg', 0.92);
+      }
+
+      async function exportAllArtboards() {
+        const artboards = objects
+          .filter(o => o.type === 'artboard')
+          .sort((a, b) => (a.artboardLabel || '').localeCompare(b.artboardLabel || ''));
+        if (artboards.length === 0) {
+          alert('No artboards to export.');
+          return;
+        }
+        // Sequentially trigger downloads with small delay so browsers don't batch-block
+        for (let i = 0; i < artboards.length; i++) {
+          const ab = artboards[i];
+          const canvas = renderArtboardCanvas(ab);
+          if (!canvas) continue;
+          await new Promise<void>((resolve) => {
+            canvas.toBlob((blob) => {
+              if (!blob) { resolve(); return; }
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `Artboard ${ab.artboardLabel || 'A'}.jpg`;
+              a.click();
+              URL.revokeObjectURL(url);
+              setTimeout(resolve, 250);
+            }, 'image/jpeg', 0.92);
+          });
+        }
+      }
+
+      function renderArtboardCanvas(ab: CanvasObject): HTMLCanvasElement | null {
         const sz = ARTBOARD_EXPORT_SIZES[ab.artboardRatio || '1:1'] || ARTBOARD_EXPORT_SIZES['1:1'];
         const exportW = sz.w, exportH = sz.h;
         const scaleX = exportW / ab.w, scaleY = exportH / ab.h;
@@ -1787,7 +1860,7 @@ function CanvasInner() {
         const canvas = document.createElement('canvas');
         canvas.width = exportW; canvas.height = exportH;
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) return null;
         // Dark background
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, exportW, exportH);
@@ -1915,16 +1988,7 @@ function CanvasInner() {
           ctx.fillText(ab.artboardFooter, 30 * scaleX, exportH - 30 * scaleY);
         }
 
-        // Export as JPEG and download
-        canvas.toBlob((blob) => {
-          if (!blob) return;
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `Artboard ${ab.artboardLabel || 'A'}.jpg`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }, 'image/jpeg', 0.92);
+        return canvas;
       }
 
 
@@ -2107,6 +2171,11 @@ function CanvasInner() {
           artboardLabel: label, artboardRatio: ratio, zIndex: 0,
         }));
         selectObject(id); renderObjects(); markDirty();
+      });
+
+      document.querySelector('[data-ctx-action="exportAllArtboards"]')?.addEventListener('click', () => {
+        hideContextMenu();
+        exportAllArtboards();
       });
 
       document.querySelector('[data-ctx-artboard="11"]')?.addEventListener('click', () => setArtboardRatio('1:1'));
@@ -3012,6 +3081,14 @@ function CanvasInner() {
             <rect x="3" y="3" width="18" height="18" rx="1" />
           </svg>
           Add Artboard
+        </div>
+        <div className="ctx-item" data-ctx-action="exportAllArtboards">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export All Artboards
         </div>
         <div className="ctx-divider"></div>
         <div className="ctx-sub">

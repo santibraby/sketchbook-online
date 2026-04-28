@@ -1964,6 +1964,93 @@ function CanvasInner() {
             const lum = (0.299 * rr + 0.587 * gg + 0.114 * bb) / 255;
             ctx.fillStyle = lum > 0.55 ? '#1a1a1a' : '#ffffff';
             ctx.fillText(hex, ox + ow / 2, oy + oh / 2);
+          } else if (obj.type === 'markup' && obj.cloud && obj.leader) {
+            const c = obj.cloud;
+            const l = obj.leader;
+            const arcR = 10 * scaleX;
+            const cx1 = ox + c.rx * scaleX, cy1 = oy + c.ry * scaleY;
+            const cx2 = ox + (c.rx + c.rw) * scaleX, cy2 = oy + (c.ry + c.rh) * scaleY;
+
+            // Draw cloud border with arcs
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2 * scaleX;
+            ctx.beginPath();
+            ctx.moveTo(cx1, cy1);
+            for (let x = cx1; x < cx2; x += arcR * 2) {
+              const end = Math.min(x + arcR * 2, cx2);
+              const midX = (x + end) / 2;
+              ctx.quadraticCurveTo(midX, cy1 - arcR * 0.8, end, cy1);
+            }
+            for (let y = cy1; y < cy2; y += arcR * 2) {
+              const end = Math.min(y + arcR * 2, cy2);
+              const midY = (y + end) / 2;
+              ctx.quadraticCurveTo(cx2 + arcR * 0.8, midY, cx2, end);
+            }
+            for (let x = cx2; x > cx1; x -= arcR * 2) {
+              const end = Math.max(x - arcR * 2, cx1);
+              const midX = (x + end) / 2;
+              ctx.quadraticCurveTo(midX, cy2 + arcR * 0.8, end, cy2);
+            }
+            for (let y = cy2; y > cy1; y -= arcR * 2) {
+              const end = Math.max(y - arcR * 2, cy1);
+              const midY = (y + end) / 2;
+              ctx.quadraticCurveTo(cx1 - arcR * 0.8, midY, cx1, end);
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // Leader line: curved arrow from text anchor to cloud edge
+            const cloudCx = (cx1 + cx2) / 2, cloudCy = (cy1 + cy2) / 2;
+            const tx = ox + l.tx * scaleX, ty = oy + l.ty * scaleY;
+            const textAnchorX = tx, textAnchorY = ty + 20 * scaleY;
+
+            const ddx = textAnchorX - cloudCx, ddy = textAnchorY - cloudCy;
+            const GAP = 14 * scaleX;
+            let aeX: number, aeY: number;
+            if (Math.abs(ddx) === 0 && Math.abs(ddy) === 0) {
+              aeX = cloudCx; aeY = cy1 - GAP;
+            } else {
+              const sX = ddx !== 0 ? ((cx2 - cx1) / 2) / Math.abs(ddx) : Infinity;
+              const sY = ddy !== 0 ? ((cy2 - cy1) / 2) / Math.abs(ddy) : Infinity;
+              const s = Math.min(sX, sY);
+              const edgeX = cloudCx + ddx * s, edgeY = cloudCy + ddy * s;
+              const toDist = Math.hypot(ddx, ddy);
+              aeX = edgeX + (ddx / toDist) * GAP;
+              aeY = edgeY + (ddy / toDist) * GAP;
+            }
+
+            const mx = (textAnchorX + aeX) / 2, my = (textAnchorY + aeY) / 2;
+            const dist = Math.hypot(aeX - textAnchorX, aeY - textAnchorY) || 1;
+            const perpX = -(aeY - textAnchorY) / dist, perpY = (aeX - textAnchorX) / dist;
+            const curvature = Math.min(dist * 0.25, 60 * scaleX);
+            const cpx = mx + perpX * curvature, cpy = my + perpY * curvature;
+
+            ctx.strokeStyle = '#ff4444';
+            ctx.lineWidth = 2 * scaleX;
+            ctx.beginPath();
+            ctx.moveTo(textAnchorX, textAnchorY);
+            ctx.quadraticCurveTo(cpx, cpy, aeX, aeY);
+            ctx.stroke();
+
+            // Arrowhead
+            const angle = Math.atan2(aeY - cpy, aeX - cpx);
+            const aLen = 12 * scaleX, aSpread = 0.35;
+            ctx.fillStyle = '#ff4444';
+            ctx.beginPath();
+            ctx.moveTo(aeX - aLen * Math.cos(angle - aSpread), aeY - aLen * Math.sin(angle - aSpread));
+            ctx.lineTo(aeX, aeY);
+            ctx.lineTo(aeX - aLen * Math.cos(angle + aSpread), aeY - aLen * Math.sin(angle + aSpread));
+            ctx.closePath();
+            ctx.fill();
+
+            // Markup text label
+            const mFontSize = Math.round(14 * scaleX);
+            ctx.font = `600 ${mFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+            ctx.fillStyle = '#ff4444';
+            ctx.textBaseline = 'top';
+            const textIsLeft = l.tx * scaleX < (cx1 + cx2) / 2 - ox;
+            ctx.textAlign = textIsLeft ? 'right' : 'left';
+            ctx.fillText(obj.markupText || 'Note', tx, ty);
           }
           ctx.restore();
         }

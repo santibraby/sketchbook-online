@@ -2043,14 +2043,25 @@ function CanvasInner() {
             ctx.closePath();
             ctx.fill();
 
-            // Markup text label
+            // Markup text label with word-wrap (matches CSS max-width: 250px)
             const mFontSize = Math.round(14 * scaleX);
             ctx.font = `600 ${mFontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
             ctx.fillStyle = '#ff4444';
             ctx.textBaseline = 'top';
             const textIsLeft = l.tx * scaleX < (cx1 + cx2) / 2 - ox;
             ctx.textAlign = textIsLeft ? 'right' : 'left';
-            ctx.fillText(obj.markupText || 'Note', tx, ty);
+            const maxTextW = 250 * scaleX;
+            const lineH = mFontSize * 1.3;
+            const mWords = (obj.markupText || 'Note').split(' ');
+            let mLine = '', mLineY = ty;
+            for (const word of mWords) {
+              const testLine = mLine ? mLine + ' ' + word : word;
+              if (ctx.measureText(testLine).width > maxTextW && mLine) {
+                ctx.fillText(mLine, tx, mLineY);
+                mLine = word; mLineY += lineH;
+              } else { mLine = testLine; }
+            }
+            if (mLine) ctx.fillText(mLine, tx, mLineY);
           }
           ctx.restore();
         }
